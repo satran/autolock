@@ -63,10 +63,11 @@ func main() {
 			}
 		}
 
-		res, err := command.Output()
+		res, err := command.CombinedOutput()
 		if err != nil {
-			log.Println(err)
+			log.Printf("%s: %v (%s)", command.Args, err, res)
 			// Ignore error and try again
+			time.Sleep(1 * time.Second)
 			continue
 		}
 
@@ -109,19 +110,12 @@ func main() {
 func connect(rfcomm, device, addr, channel string, connTime time.Duration) {
 	for {
 		command := exec.Command(rfcomm, "connect", device, addr, channel)
-		command.Stderr = os.Stderr
-		err := command.Start()
-		if err != nil {
-			log.Fatal(err)
-		}
 		connMtx.Lock()
 		connected = true
 		connMtx.Unlock()
-		log.Println("Connected...")
-
-		err = command.Wait()
+		res, err := command.CombinedOutput()
 		if err != nil {
-			log.Fatalf("%s: %v", command.Args, err)
+			log.Fatalf("%s: %v (%s)", command.Args, err, res)
 		}
 		log.Println("Disconnected")
 

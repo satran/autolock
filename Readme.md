@@ -26,4 +26,4 @@ If `hciconfig` says `DOWN` in the third line, the device can be started with
 Use ``hcitool scan` AFTER you've *enabled* scanning on your phone.
 
 ## Errors
-`Can't open RFCOMM control socket: Protocol not supported`: `modprobe -v rfcomm`
+`Can't open RFCOMM control socket: Protocol not supported`: `sudo modprobe -v rfcomm`
