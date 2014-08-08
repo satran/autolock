@@ -6,11 +6,11 @@
 
 ## Installation
 
-    go get github.com/tgulacsi/autolock
+    go get github.com/satran/autolock
 
 If you want to compile in your phone's address, then you can do it with
 
-	go build -ldflags '-X main.addr the:addr' github.com/tgulacsi/autolock
+	go build -ldflags '-X main.addr the:addr' github.com/satran/autolock
 
 If you don't do this, you'll have to add the address for each invocation of autolock.
 
