@@ -1,115 +1,127 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
+	"sync"
 	"time"
 )
 
-const (
-	// To establish initial connection
-	rfcomm string = "/usr/bin/rfcomm"
-
-	// To ping for the connection signal
-	hcitool string = "/usr/bin/hcitool"
-
-	// To lock the system
-	lock string = "/usr/local/bin/slock"
+var (
+	connected = false
+	connMtx   sync.Mutex
 
 	// Phone/Bluetooth device address
-	addr = "B0:EC:71:E1:DA:49"
-
-	channel = "2"
-	device  = "0"
-
-	PING_TIME = 10
-	CONN_TIME = 10
-	
-	PROXIMITY = -1
+	addr = ""
 )
 
-var connected = false
-
 func main() {
-	go connect()
+	fRfcomm := flag.String("rfcomm", "/usr/bin/rfcomm", "rfcomm executable")
+	fHcitool := flag.String("hcitool", "/usr/bin/hcitool", "hcitool executable")
+	fLock := flag.String("lock", "slock", "locker executable")
+	fChannel := flag.String("channel", "2", "channel")
+	fDevice := flag.String("device", "0", "device")
+	fPingTime := flag.Duration("ping", 10*time.Second, "ping time")
+	fConnTime := flag.Duration("conn", 10*time.Second, "conn time")
+	fProximity := flag.Int("proximity", -1, "proximity")
+	flag.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: "+os.Args[0]+" [options] <device:mac:addr>")
+		flag.PrintDefaults()
+	}
+	flag.Parse()
 
-	var lock_cmd *exec.Cmd
+	if flag.NArg() == 1 {
+		addr = flag.Arg(0)
+	} else if addr == "" {
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	go connect(*fRfcomm, *fDevice, addr, *fChannel, *fConnTime)
+
+	var lockCmd *exec.Cmd
 	locked := false
 
-	r, _ := regexp.Compile("-?[0-9]+")
+	r := regexp.MustCompile("-?[0-9]+")
 
 	for {
-		command := exec.Command(hcitool, "rssi", addr)
-		if !connected {
-			// We wait for the connection to become active again.
-			// Most likely the phone went out of range.
-			time.Sleep(CONN_TIME * time.Second)
-			continue
+		command := exec.Command(*fHcitool, "rssi", addr)
+		{
+			connMtx.Lock()
+			connected := connected
+			connMtx.Unlock()
+			if !connected {
+				// We wait for the connection to become active again.
+				// Most likely the phone went out of range.
+				time.Sleep(*fConnTime)
+				continue
+			}
 		}
 
-		res, err := command.Output()
+		res, err := command.CombinedOutput()
 		if err != nil {
-			log.Println(err)
+			log.Printf("%s: %v (%s)", command.Args, err, res)
 			// Ignore error and try again
+			time.Sleep(1 * time.Second)
 			continue
 		}
 
-		out := string(res)
-		if out == "" {
+		if len(res) == 0 {
 			log.Println("Could not find device.")
 			continue
 		}
+		out := string(res)
 
 		proximity, _ := strconv.Atoi(r.FindString(out))
 
-		if proximity >= PROXIMITY && locked {
-			if lock_cmd == nil {
+		if proximity >= *fProximity && locked {
+			if lockCmd == nil {
 				// Most likely the command finished executing.
 				// I might have unlocked the machine manually.
 				locked = false
-				time.Sleep(PING_TIME * time.Second)
+				time.Sleep(*fPingTime)
 				continue
 			}
 
-			err := lock_cmd.Process.Kill()
+			err := lockCmd.Process.Kill()
 			if err != nil {
 				log.Println(err)
 			} else {
 				locked = false
 			}
-		
 		} else if !locked {
-			lock_cmd = exec.Command(lock)
-			err := lock_cmd.Start()
+			lockCmd = exec.Command(*fLock)
+			err := lockCmd.Start()
 			if err != nil {
 				log.Println(err)
 			}
 			locked = true
 		}
 
-		time.Sleep(PING_TIME * time.Second)
+		time.Sleep(*fPingTime)
 	}
 }
 
-func connect() {
+func connect(rfcomm, device, addr, channel string, connTime time.Duration) {
 	for {
 		command := exec.Command(rfcomm, "connect", device, addr, channel)
-		err := command.Start()
-		if err != nil {
-			log.Fatal(err)
-		}
+		connMtx.Lock()
 		connected = true
-		log.Println("Connected...")
-		
-		err = command.Wait()
+		connMtx.Unlock()
+		res, err := command.CombinedOutput()
 		if err != nil {
-			log.Fatal(err)
+			log.Fatalf("%s: %v (%s)", command.Args, err, res)
 		}
 		log.Println("Disconnected")
-		
+
+		connMtx.Lock()
 		connected = false
-		time.Sleep(CONN_TIME * time.Second)
+		connMtx.Unlock()
+		time.Sleep(connTime)
 	}
 }
